@@ -47,7 +47,7 @@ team_t team = {
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y)) // 최대 값 반환
 
-#define PACK(size, alloc)   ((size) | (alloc))
+#define PACK(size, alloc)   ((size) | (alloc))     // 주소 연산을 통해서 Size와 Alloc(가용 상태) 상태를 합친다.
 
 #define GET(p) (*(unsigned int *)(p))              // 주소 P에서 4바이트 값을 읽음
 #define PUT(p, val) (*(unsigned int *)(p) = (val)) // 주소 P에 4바이트 값을 작성
@@ -68,40 +68,52 @@ static void *coalesce(void *);
 static void *find_fit(size_t);
 static void place(void *, size_t);
 
+static char *heap_listp;
+
 /*
  * mm_init - initialize the malloc package.
  */
-static char *heap_listp;
-
-int mm_init(void)
+int mm_init(void)   // 초기 힙 생성
 {
+    // 초기 힙 공간 요청
     if ((heap_listp = mem_sbrk(4 * WSIZE)) == (void *)-1)
         return -1;
 
-    PUT(heap_listp, 0);
-    PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1));
-    PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));
-    PUT(heap_listp + (3 * WSIZE), PACK(0, 1));
-    heap_listp += (2 * WSIZE);
+    PUT(heap_listp, 0);                             // 패딩
+    PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1));  // 프롤로그 블록 헤더
+    PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));  // 프롤로그 블록 푸터
+    PUT(heap_listp + (3 * WSIZE), PACK(0, 1));      // 에필로그 블록 헤더
 
-    if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
+    heap_listp += (2 * WSIZE);                      // 포인터를 프롤로그 블록 푸터로 이동.
+
+    if (extend_heap(CHUNKSIZE / WSIZE) == NULL)     // 할당 실패 시, -1 반환
         return -1;
     return 0;
 }
 
-static void *extend_heap(size_t words)
+static void *extend_heap(size_t words)  // 힙 확장
 {
-    char *bp;
-    size_t size;
+    char *bp;       // 새로운 블록을 가리키는 포인터
+    size_t size;    // 할당할 Size
 
+    // 2의 배수로 정렬한다. -> 메모리 접근 효율성 향상
+    // words % 2 == 1일 경우, 홀수가 된다. + 1을 더해서 짝수로 만든다.
     size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
+
+    // 힙을 Size만큼 확장.
+    // 성공하면 새로운 블록의 시작 주소를 bp에 저장한다.
     if ((long)(bp = mem_sbrk(size)) == -1)
         return NULL;
 
+    // 헤더와 푸터 초기화.
+    // 0은 가용 상태를 의미한다.
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
+
+    // 에필로그 헤더를 배치한다.
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
 
+    // 인접한 가용 블록이 있다면 병합한다.
     return coalesce(bp);
 }
 
@@ -126,7 +138,8 @@ void *mm_malloc(size_t size)
     // Size가 Double Word Size보다 클 경우.
         asize = DSIZE * ((size + (DSIZE) + (DSIZE - 1)) / DSIZE);
 
-    // NULL일 경우에는 Heap 확장.
+    // 공간을 찾았는데 NULL을 반환하지 않았다면 ? -> 적당한 가용 공간을 찾았다.
+    // NULL이면 공간 확장.
     if ((bp = find_fit(asize)) != NULL)
     {
         place(bp, asize);
@@ -189,27 +202,26 @@ static void *coalesce(void *bp)
 void *mm_realloc(void *ptr, size_t size)
 {
     if (size <= 0)
-        {
-            mm_free(ptr);
-            return 0;
-        }
-        if (ptr == NULL)
-        {
-            return mm_malloc(size);
-        }
-        void *newp = mm_malloc(size);
-        if (newp == NULL)
-        {
-            return 0;
-        }
-        size_t oldsize = GET_SIZE(HDRP(ptr));
-        if (size < oldsize)
-        {
-            oldsize = size;
-        }
-        memcpy(newp, ptr, oldsize);
+    {
         mm_free(ptr);
-        return newp;
+        return 0;
+    }
+    if (ptr == NULL)
+        return mm_malloc(size);
+
+    void *newp = mm_malloc(size);
+    if (newp == NULL)
+        return 0;
+
+    size_t oldsize = GET_SIZE(HDRP(ptr));
+
+    if (size < oldsize)
+        oldsize = size;
+
+    memcpy(newp, ptr, oldsize);
+    mm_free(ptr);
+
+    return newp;
 }
 
 static void *find_fit(size_t asize)
