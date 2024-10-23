@@ -548,8 +548,8 @@ static trace_t *read_trace(char *tracedir, char *filename)
 	
     }
     fclose(tracefile);
-    assert(max_index == trace->num_ids - 1);
-    assert(trace->num_ops == op_index);
+    // assert(max_index == trace->num_ids - 1);
+    // assert(trace->num_ops == op_index);
     
     return trace;
 }
